@@ -1,0 +1,5 @@
+# AGP 8.5.1 needs JDK 17.
+jdk:
+  - openjdk17
+install:
+  - ./gradlew :library:publishToMavenLocal :library-no-op:publishToMavenLocal :library-room:publishToMavenLocal -Pversion=$VERSION

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Line icon in the style of SF Symbols. Tinted at runtime. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:pathData="M2,12a10,10 0,1 0,20 0a10,10 0,1 0,-20 0zM14.404,8.182L15.818,9.596L13.414,12L15.818,14.404L14.404,15.818L12,13.414L9.596,15.818L8.182,14.404L10.586,12L8.182,9.596L9.596,8.182L12,10.586Z"
+        android:fillColor="#FF000000"
+        android:fillType="evenOdd" />
+</vector>

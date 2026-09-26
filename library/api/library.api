@@ -1,0 +1,36 @@
+public final class com.phiraphongbenzz.ktorch.NetworkInspector implements io.ktor.client.plugins.api.ClientPlugin<com.phiraphongbenzz.ktorch.NetworkInspectorConfig> {
+  public static final com.phiraphongbenzz.ktorch.NetworkInspector INSTANCE;
+  public final void launchUI(android.content.Context);
+  public final void clear();
+  public io.ktor.client.plugins.api.ClientPluginInstance<com.phiraphongbenzz.ktorch.NetworkInspectorConfig> prepare(kotlin.jvm.functions.Function1<? super com.phiraphongbenzz.ktorch.NetworkInspectorConfig, kotlin.Unit>);
+  public void install(io.ktor.client.plugins.api.ClientPluginInstance<com.phiraphongbenzz.ktorch.NetworkInspectorConfig>, io.ktor.client.HttpClient);
+  public io.ktor.util.AttributeKey<io.ktor.client.plugins.api.ClientPluginInstance<com.phiraphongbenzz.ktorch.NetworkInspectorConfig>> getKey();
+  public java.lang.Object prepare(kotlin.jvm.functions.Function1);
+  public void install(java.lang.Object, io.ktor.client.HttpClient);
+}
+public final class com.phiraphongbenzz.ktorch.NetworkInspectorConfig {
+  public com.phiraphongbenzz.ktorch.NetworkInspectorConfig();
+  public final android.content.Context getContext();
+  public final void setContext(android.content.Context);
+  public final boolean getEnabled();
+  public final void setEnabled(boolean);
+  public final long getMaxContentLength();
+  public final void setMaxContentLength(long);
+  public final int getMaxTransactions();
+  public final void setMaxTransactions(int);
+  public final java.util.Set<java.lang.String> getSkipHosts();
+  public final java.util.Set<java.lang.String> getSkipPathPrefixes();
+  public final kotlin.jvm.functions.Function1<io.ktor.http.Url, java.lang.Boolean> getSkipWhen();
+  public final void setSkipWhen(kotlin.jvm.functions.Function1<? super io.ktor.http.Url, java.lang.Boolean>);
+  public final java.util.Set<java.lang.String> getRedactHeaders();
+  public final java.util.Set<java.lang.String> getRedactQueryParams();
+  public final java.util.Set<java.lang.String> getRedactBodyFields();
+  public final boolean getShowNotification();
+  public final void setShowNotification(boolean);
+  public final boolean getPersistToDisk();
+  public final void setPersistToDisk(boolean);
+  public final kotlin.jvm.functions.Function1<java.lang.String, kotlin.Unit> getLogger();
+  public final void setLogger(kotlin.jvm.functions.Function1<? super java.lang.String, kotlin.Unit>);
+}
+public final class com.phiraphongbenzz.ktorch.NetworkInspectorKt {
+}
