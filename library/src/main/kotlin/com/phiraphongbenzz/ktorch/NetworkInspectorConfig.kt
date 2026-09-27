@@ -20,6 +20,11 @@ public class NetworkInspectorConfig {
      * no context is set, install fails with an [IllegalStateException].
      */
     public var context: Context? = null
+        set(value) {
+            // Ktor keeps this config for the client's whole lifetime, so an Activity stored here
+            // would leak. Only the application context is ever kept.
+            field = value?.applicationContext ?: value
+        }
 
     /** Set to `false` to install the plugin without recording anything. */
     public var enabled: Boolean = true

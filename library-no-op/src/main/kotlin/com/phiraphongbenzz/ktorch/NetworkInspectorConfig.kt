@@ -11,6 +11,10 @@ import io.ktor.utils.io.KtorDsl
 @KtorDsl
 public class NetworkInspectorConfig {
     public var context: Context? = null
+        set(value) {
+            // Kept for the client's lifetime, in release builds too: never hold an Activity.
+            field = value?.applicationContext ?: value
+        }
     public var enabled: Boolean = true
     public var maxContentLength: Long = 250_000
     public var maxTransactions: Int = 100

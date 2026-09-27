@@ -1,5 +1,7 @@
 package com.phiraphongbenzz.ktorch
 
+import android.content.Context
+import android.content.ContextWrapper
 import com.phiraphongbenzz.ktorch.internal.capture.BoundedBuffer
 import com.phiraphongbenzz.ktorch.internal.capture.Redactor
 import com.phiraphongbenzz.ktorch.internal.data.Body
@@ -16,6 +18,7 @@ import com.phiraphongbenzz.ktorch.internal.format.filterBy
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -154,6 +157,16 @@ class FormatTest {
     fun `curl notes bodies that were not captured`() {
         val t = transaction(method = "POST", body = Body(BodyState.STREAMING, "multipart/form-data", 1024))
         assertTrue(CurlFormatter.format(t).startsWith("# NOTE: request body not captured"))
+    }
+
+    @Test
+    fun `config keeps only the application context`() {
+        val app = object : ContextWrapper(null) {}
+        val activity = object : ContextWrapper(null) {
+            override fun getApplicationContext(): Context = app
+        }
+        val config = NetworkInspectorConfig().apply { context = activity }
+        assertSame("an Activity passed in must not be retained by the client", app, config.context)
     }
 
     @Test
