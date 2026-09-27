@@ -149,7 +149,11 @@ swallowed and the real request is not affected.
   pretty-printed with syntax colors (duplicate keys and number spelling kept exactly) and can be
   switched back to raw. A **Copy** button next to
   the Pretty switch copies the body exactly as shown. Large bodies render lazily, line by line.
-- **Actions:** Copy as cURL, Share as cURL, Copy body, Share as text file, Share all, Clear.
+  The magnifier searches JSON key names, highlighting each hit with a count and previous/next,
+  and a floating button scrolls long bodies back to the top.
+- **Actions:** Copy as cURL, Share as cURL, Copy body, Share as text file, Share all, Clear. The
+  copy button in the detail bar copies the method and URL, request headers and pretty-printed
+  response body as one block.
 - **Large screens:** list and detail side by side.
 
 ## Compatibility

@@ -147,6 +147,8 @@ internal fun NavBar(
     background: Color,
     leading: @Composable () -> Unit = {},
     trailing: @Composable RowScope.() -> Unit = {},
+    /** Pinned under the bar and above its hairline, e.g. a find bar. */
+    bottom: @Composable () -> Unit = {},
 ) {
     val p = palette
     val progress by animateFloatAsState(if (titleVisible) 1f else 0f, label = "navTitle")
@@ -175,6 +177,7 @@ internal fun NavBar(
             )
             Row(Modifier.align(Alignment.CenterEnd), verticalAlignment = Alignment.CenterVertically, content = trailing)
         }
+        bottom()
         HorizontalDivider(thickness = Dp.Hairline, color = p.separator.copy(alpha = p.separator.alpha * progress))
     }
 }
@@ -251,50 +254,14 @@ internal fun SearchField(query: String, onQueryChange: (String) -> Unit, placeho
     BackHandler(enabled = focused) { focusManager.clearFocus() }
 
     Row(modifier, verticalAlignment = Alignment.CenterVertically) {
-        Row(
-            Modifier
-                .weight(1f)
-                .height(36.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(p.fill)
-                .padding(horizontal = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            KIcon(R.drawable.ktorch_ic_search, contentDescription = null, tint = p.secondaryLabel, size = 17.dp)
-            Spacer(Modifier.width(6.dp))
-            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
-                if (query.isEmpty()) {
-                    Text(placeholder, style = KType.body, color = p.secondaryLabel, maxLines = 1)
-                }
-                BasicTextField(
-                    value = query,
-                    onValueChange = onQueryChange,
-                    singleLine = true,
-                    textStyle = KType.body.copy(color = p.label),
-                    cursorBrush = SolidColor(p.label),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() }),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .onFocusChanged { focused = it.isFocused },
-                )
-            }
-            if (query.isNotEmpty()) {
-                Box(
-                    Modifier
-                        .size(28.dp)
-                        .clickable(
-                            remember { MutableInteractionSource() },
-                            indication = null,
-                            onClickLabel = "Clear search",
-                            role = Role.Button,
-                        ) { onQueryChange("") },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    KIcon(R.drawable.ktorch_ic_clear, contentDescription = "Clear", tint = p.secondaryLabel, size = 17.dp)
-                }
-            }
-        }
+        SearchBox(
+            query = query,
+            onQueryChange = onQueryChange,
+            placeholder = placeholder,
+            modifier = Modifier.weight(1f),
+            fieldModifier = Modifier.onFocusChanged { focused = it.isFocused },
+            onSearch = { focusManager.clearFocus() },
+        )
         AnimatedVisibility(
             visible = focused,
             enter = fadeIn() + expandHorizontally(expandFrom = Alignment.Start),
@@ -311,6 +278,62 @@ internal fun SearchField(query: String, onQueryChange: (String) -> Unit, placeho
                         focusManager.clearFocus()
                     },
             )
+        }
+    }
+}
+
+/** The rounded field itself: magnifier, placeholder, text, then [trailing] and a clear button. */
+@Composable
+internal fun SearchBox(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    placeholder: String,
+    modifier: Modifier = Modifier,
+    fieldModifier: Modifier = Modifier,
+    onSearch: () -> Unit = {},
+    trailing: @Composable RowScope.() -> Unit = {},
+) {
+    val p = palette
+    Row(
+        modifier
+            .height(36.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(p.fill)
+            .padding(horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        KIcon(R.drawable.ktorch_ic_search, contentDescription = null, tint = p.secondaryLabel, size = 17.dp)
+        Spacer(Modifier.width(6.dp))
+        Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+            if (query.isEmpty()) {
+                Text(placeholder, style = KType.body, color = p.secondaryLabel, maxLines = 1)
+            }
+            BasicTextField(
+                value = query,
+                onValueChange = onQueryChange,
+                singleLine = true,
+                textStyle = KType.body.copy(color = p.label),
+                cursorBrush = SolidColor(p.label),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(onSearch = { onSearch() }),
+                modifier = fieldModifier.fillMaxWidth(),
+            )
+        }
+        trailing()
+        if (query.isNotEmpty()) {
+            Box(
+                Modifier
+                    .size(28.dp)
+                    .clickable(
+                        remember { MutableInteractionSource() },
+                        indication = null,
+                        onClickLabel = "Clear search",
+                        role = Role.Button,
+                    ) { onQueryChange("") },
+                contentAlignment = Alignment.Center,
+            ) {
+                KIcon(R.drawable.ktorch_ic_clear, contentDescription = "Clear", tint = p.secondaryLabel, size = 17.dp)
+            }
         }
     }
 }

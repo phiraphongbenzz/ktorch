@@ -32,6 +32,16 @@ internal object TextExporter {
     fun formatAll(transactions: List<HttpTransaction>): String =
         transactions.joinToString("\n\n") { format(it) }
 
+    /** Short form for the clipboard: `[METHOD] url`, request headers and the pretty response body. */
+    fun compact(t: HttpTransaction): String = buildString {
+        append('[').append(t.method).append("] ").append(t.url).append('\n')
+        append("\n[Header]\n")
+        headers(t.requestHeaders)
+        append("\n[Response]\n")
+        // Failed before any response: say why instead of "Waiting for response…".
+        if (t.responseBody == null && t.error != null) line("Error", t.error) else body(t.responseBody)
+    }.trimEnd()
+
     private fun StringBuilder.line(name: String, value: String) {
         append(name).append(": ").append(value).append('\n')
     }

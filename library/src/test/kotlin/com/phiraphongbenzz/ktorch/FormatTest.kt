@@ -14,6 +14,7 @@ import com.phiraphongbenzz.ktorch.internal.data.TransactionStore
 import com.phiraphongbenzz.ktorch.internal.format.CurlFormatter
 import com.phiraphongbenzz.ktorch.internal.format.JsonFormatter
 import com.phiraphongbenzz.ktorch.internal.format.StatusFilter
+import com.phiraphongbenzz.ktorch.internal.format.TextExporter
 import com.phiraphongbenzz.ktorch.internal.format.filterBy
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -157,6 +158,37 @@ class FormatTest {
     fun `curl notes bodies that were not captured`() {
         val t = transaction(method = "POST", body = Body(BodyState.STREAMING, "multipart/form-data", 1024))
         assertTrue(CurlFormatter.format(t).startsWith("# NOTE: request body not captured"))
+    }
+
+    @Test
+    fun `compact copy has method and url, request headers and the pretty response`() {
+        val t = transaction(code = 200, headers = listOf(Header("Accept", "application/json"), Header("Authorization", "***")))
+            .copy(responseBody = Body(BodyState.CAPTURED, "application/json", 18, """{"id":1,"ok":true}""".toByteArray()))
+        assertEquals(
+            """
+            [GET] https://api.example.com/items?id=1
+
+            [Header]
+            Accept: application/json
+            Authorization: ***
+
+            [Response]
+            {
+              "id": 1,
+              "ok": true
+            }
+            """.trimIndent(),
+            TextExporter.compact(t),
+        )
+    }
+
+    @Test
+    fun `compact copy shows the error when there is no response`() {
+        val t = transaction(method = "POST").copy(error = "ConnectException: Connection refused", totalMillis = 5)
+        assertEquals(
+            "[POST] https://api.example.com/items?id=1\n\n[Header]\n(none)\n\n[Response]\nError: ConnectException: Connection refused",
+            TextExporter.compact(t),
+        )
     }
 
     @Test

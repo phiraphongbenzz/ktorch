@@ -28,8 +28,8 @@ internal data class JsonColors(val key: Color, val string: Color, val number: Co
 
 /**
  * Apple-style palette. Black and white carry the interface; color only carries meaning: status
- * classes and JSON syntax. Values are iOS system colors, using Apple's higher-contrast variants for
- * text on light backgrounds so badges stay readable.
+ * classes, JSON syntax and search hits. Values are iOS system colors, using Apple's higher-contrast
+ * variants for text on light backgrounds so badges stay readable.
  */
 @Immutable
 internal data class KtorchPalette(
@@ -51,6 +51,9 @@ internal data class KtorchPalette(
     val serverError: Tone,
     val neutral: Tone,
     val json: JsonColors,
+    /** Key search: every hit, and the current one, which is drawn with black text. */
+    val match: Color,
+    val currentMatch: Color,
 ) {
     fun tone(t: HttpTransaction): Tone {
         val code = t.responseCode
@@ -89,6 +92,8 @@ private val LightPalette = KtorchPalette(
         number = Color(0xFF1C00CF),
         literal = Color(0xFF9B2393),
     ),
+    match = Color(0x59FFCC00),
+    currentMatch = Color(0xFFFFCC00),
 )
 
 private val DarkPalette = KtorchPalette(
@@ -116,6 +121,8 @@ private val DarkPalette = KtorchPalette(
         number = Color(0xFFD0BF69),
         literal = Color(0xFFFC5FA3),
     ),
+    match = Color(0x4DFFD60A),
+    currentMatch = Color(0xFFFFD60A),
 )
 
 private val LocalPalette = staticCompositionLocalOf { LightPalette }

@@ -2,7 +2,17 @@ package com.phiraphongbenzz.ktorch.internal.ui
 
 import android.content.Context
 import android.os.Build
+import androidx.activity.compose.BackHandler
+import androidx.annotation.DrawableRes
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -18,20 +28,27 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -45,10 +62,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -59,6 +83,7 @@ import com.phiraphongbenzz.ktorch.internal.data.Header
 import com.phiraphongbenzz.ktorch.internal.data.HttpTransaction
 import com.phiraphongbenzz.ktorch.internal.format.CurlFormatter
 import com.phiraphongbenzz.ktorch.internal.format.Formats
+import com.phiraphongbenzz.ktorch.internal.format.TextExporter
 import com.phiraphongbenzz.ktorch.internal.share.Sharer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -67,30 +92,68 @@ import java.util.Locale
 
 private val TABS = listOf("Overview", "Request", "Response")
 
+/** Items above the tab content: header, stats and tabs. */
+private const val TOP_ITEMS = 3
+
 /** Bodies up to this size are formatted inline; larger ones off the main thread. */
 private const val SYNC_FORMAT_BYTES = 32 * 1024
+
+/** Documents with up to this many keys are searched inline; larger ones off the main thread. */
+private const val SYNC_SEARCH_KEYS = 5_000
+
+/** The scroll-to-top button, and its distance from the screen edges. */
+private val TopButtonSize = 44.dp
+private val TopButtonMargin = 16.dp
 
 @Composable
 internal fun TransactionDetailScreen(transaction: HttpTransaction?, onBack: (() -> Unit)?) {
     val p = palette
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val focusManager = LocalFocusManager.current
     var tab by rememberSaveable(transaction?.id) { mutableIntStateOf(2) }
     var pretty by rememberSaveable { mutableStateOf(true) }
     var menuOpen by remember { mutableStateOf(false) }
+    var searching by rememberSaveable(transaction?.id) { mutableStateOf(false) }
+    var query by rememberSaveable(transaction?.id) { mutableStateOf("") }
     val listState = rememberLazyListState()
     // The inline title takes over once the large title/header has slid under the bar.
     val threshold = with(LocalDensity.current) { 40.dp.roundToPx() }
     val collapsed by remember {
         derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > threshold }
     }
+    // Offered once the tabs have scrolled away.
+    val showTopButton by remember { derivedStateOf { listState.firstVisibleItemIndex >= TOP_ITEMS } }
 
     val body = when (tab) {
         1 -> transaction?.requestBody
         2 -> transaction?.responseBody
         else -> null
     }
+    val headers = when (tab) {
+        1 -> transaction?.requestHeaders
+        2 -> transaction?.responseHeaders
+        else -> null
+    }.orEmpty()
+    val note = Formats.bodyNote(body)
     val content = rememberBodyContent(body, pretty, p.json)
+    val hits = rememberKeyHits(content, if (searching) query else "")
+    var current by remember(hits) { mutableIntStateOf(0) }
+    val firstLine = firstLineIndex(headers, note)
+    LaunchedEffect(hits) { hits.firstOrNull()?.let { listState.reveal(firstLine + it.line) } }
+
+    fun closeSearch() {
+        focusManager.clearFocus()
+        searching = false
+    }
+
+    fun step(by: Int) {
+        if (hits.isEmpty()) return
+        current = (current + by).mod(hits.size)
+        val index = firstLine + hits[current].line
+        scope.launch { listState.reveal(index) }
+    }
+    BackHandler(enabled = searching) { closeSearch() }
 
     Column(Modifier.fillMaxSize().background(p.groupedBackground)) {
         NavBar(
@@ -100,8 +163,11 @@ internal fun TransactionDetailScreen(transaction: HttpTransaction?, onBack: (() 
             leading = { if (onBack != null) BackButton("Ktorch", onBack) },
             trailing = {
                 if (transaction == null) return@NavBar
-                BarButton(R.drawable.ktorch_ic_share, contentDescription = "Share as text file") {
-                    scope.launch { share(context) { Sharer.shareTransaction(context, transaction) } }
+                BarButton(R.drawable.ktorch_ic_copy, contentDescription = "Copy request and response") {
+                    scope.launch {
+                        val text = withContext(Dispatchers.Default) { TextExporter.compact(transaction) }
+                        copied(context, Sharer.copy(context, "Request", text))
+                    }
                 }
                 Box {
                     BarButton(R.drawable.ktorch_ic_more, contentDescription = "More") { menuOpen = true }
@@ -132,6 +198,27 @@ internal fun TransactionDetailScreen(transaction: HttpTransaction?, onBack: (() 
                     }
                 }
             },
+            bottom = {
+                AnimatedVisibility(
+                    visible = searching,
+                    enter = fadeIn() + expandVertically(),
+                    exit = fadeOut() + shrinkVertically(),
+                ) {
+                    KeySearchBar(
+                        query = query,
+                        onQueryChange = { query = it },
+                        status = when {
+                            !searching || query.isEmpty() -> ""
+                            hits.isEmpty() -> "Not found"
+                            else -> "${current + 1} of ${hits.size}"
+                        },
+                        canStep = hits.isNotEmpty(),
+                        onPrevious = { step(-1) },
+                        onNext = { step(1) },
+                        onDone = { closeSearch() },
+                    )
+                }
+            },
         )
 
         if (transaction == null) {
@@ -143,39 +230,63 @@ internal fun TransactionDetailScreen(transaction: HttpTransaction?, onBack: (() 
             return@Column
         }
 
-        SelectionContainer {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(
-                    bottom = WindowInsets.navigationBars.only(WindowInsetsSides.Bottom)
-                        .asPaddingValues().calculateBottomPadding() + 28.dp,
-                ),
-            ) {
-                item(key = "header") { DetailHeader(transaction) }
-                item(key = "stats") { StatsCard(transaction) }
-                item(key = "tabs") {
-                    SegmentedControl(
-                        options = TABS,
-                        selected = tab,
-                        onSelect = { tab = it },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(start = CardMargin, end = CardMargin, top = 20.dp),
-                    )
-                }
-                when (tab) {
-                    0 -> overview(transaction)
-                    else -> message(
-                        headers = if (tab == 1) transaction.requestHeaders else transaction.responseHeaders,
-                        body = body,
-                        content = content,
-                        pretty = pretty,
-                        onPrettyChange = { pretty = it },
-                        onCopy = { copied(context, Sharer.copy(context, "Body", content.text)) },
-                    )
+        Box(Modifier.fillMaxSize()) {
+            SelectionContainer {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(
+                        // Also lets the last line scroll clear of the keyboard and the scroll-to-top button.
+                        bottom = WindowInsets.navigationBars.union(WindowInsets.ime).only(WindowInsetsSides.Bottom)
+                            .asPaddingValues().calculateBottomPadding() + 28.dp + TopButtonSize,
+                    ),
+                ) {
+                    item(key = "header") { DetailHeader(transaction) }
+                    item(key = "stats") { StatsCard(transaction) }
+                    item(key = "tabs") {
+                        SegmentedControl(
+                            options = TABS,
+                            selected = tab,
+                            onSelect = {
+                                tab = it
+                                if (it == 0) closeSearch()
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(start = CardMargin, end = CardMargin, top = 20.dp),
+                        )
+                    }
+                    when (tab) {
+                        0 -> overview(transaction)
+                        else -> message(
+                            headers = headers,
+                            note = note,
+                            content = content,
+                            pretty = pretty,
+                            onPrettyChange = {
+                                pretty = it
+                                // Keys are only located in the pretty-printed view.
+                                if (!it) closeSearch()
+                            },
+                            onCopy = { copied(context, Sharer.copy(context, "Body", content.text)) },
+                            onSearch = {
+                                pretty = true
+                                searching = true
+                            },
+                            hits = hits,
+                            current = current,
+                        )
+                    }
                 }
             }
+            ScrollToTopButton(
+                visible = showTopButton,
+                onClick = { scope.launch { listState.animateScrollToItem(0) } },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime).only(WindowInsetsSides.Bottom))
+                    .padding(TopButtonMargin),
+            )
         }
     }
 }
@@ -191,6 +302,26 @@ private fun rememberBodyContent(body: Body?, pretty: Boolean, colors: JsonColors
         value = withContext(Dispatchers.Default) { BodyContent.build(body, pretty, colors) }
     }
     return content
+}
+
+/** Keys matching [query]; big documents are searched off the main thread, keeping the last hits meanwhile. */
+@Composable
+private fun rememberKeyHits(content: BodyContent, query: String): List<LineSpan> {
+    if (content.keys.size <= SYNC_SEARCH_KEYS) return remember(content, query) { content.findKeys(query) }
+    val hits by produceState(emptyList<LineSpan>(), content, query) {
+        value = withContext(Dispatchers.Default) { content.findKeys(query) }
+    }
+    return hits
+}
+
+/** Scrolls item [index] into view with two rows of context above, unless it is fully visible. */
+private suspend fun LazyListState.reveal(index: Int) {
+    val info = layoutInfo
+    val item = info.visibleItemsInfo.firstOrNull { it.index == index }
+    // Rows behind the bottom padding (keyboard, scroll-to-top button) are not really visible.
+    val end = info.viewportEndOffset - info.afterContentPadding
+    if (item != null && item.offset >= info.viewportStartOffset && item.offset + item.size <= end) return
+    animateScrollToItem(maxOf(index - 2, 0))
 }
 
 @Composable
@@ -290,13 +421,20 @@ private fun LazyListScope.overview(t: HttpTransaction) {
     }
 }
 
+/** List index of body line 0: [TOP_ITEMS], then the rows [message] adds before the lines. */
+private fun firstLineIndex(headers: List<Header>, note: String?): Int =
+    TOP_ITEMS + 1 + maxOf(headers.size, 1) + 1 + (if (note != null) 1 else 0)
+
 private fun LazyListScope.message(
     headers: List<Header>,
-    body: Body?,
+    note: String?,
     content: BodyContent,
     pretty: Boolean,
     onPrettyChange: (Boolean) -> Unit,
     onCopy: () -> Unit,
+    onSearch: () -> Unit,
+    hits: List<LineSpan>,
+    current: Int,
 ) {
     item(key = "headers-header") { SectionHeader(if (headers.isEmpty()) "Headers" else "Headers · ${headers.size}") }
     if (headers.isEmpty()) {
@@ -308,8 +446,9 @@ private fun LazyListScope.message(
     }
     item(key = "body-header") {
         SectionHeader("Body") {
+            if (content.isJson) HeaderButton(R.drawable.ktorch_ic_search, label = null, contentDescription = "Search keys", onClick = onSearch)
             // Copy sits next to the Pretty/Raw switch and copies exactly what is shown.
-            if (content.text.isNotEmpty()) CopyButton(onCopy)
+            if (content.text.isNotEmpty()) HeaderButton(R.drawable.ktorch_ic_copy, label = "Copy", contentDescription = null, onClick = onCopy)
             if (content.isJson) {
                 Spacer(Modifier.width(8.dp))
                 SegmentedControl(
@@ -322,21 +461,39 @@ private fun LazyListScope.message(
             }
         }
     }
-    val note = Formats.bodyNote(body)
     val lines = content.lines
     if (note != null) {
         item(key = "body-note") { NoteRow(note, first = true, last = lines.isEmpty()) }
     }
     itemsIndexed(lines, key = { i, _ -> "line-$i" }) { i, line ->
-        BodyLine(line, content.highlighted, first = note == null && i == 0, last = i == lines.lastIndex)
+        // Pretty JSON has at most one key per line, so at most one hit.
+        val hit = hits.binarySearchBy(i) { it.line }
+        BodyLine(
+            line = line,
+            highlighted = content.highlighted,
+            first = note == null && i == 0,
+            last = i == lines.lastIndex,
+            hit = hits.getOrNull(hit),
+            current = hit == current,
+        )
     }
 }
 
 @Composable
-private fun BodyLine(line: AnnotatedString, highlighted: Boolean, first: Boolean, last: Boolean) {
+private fun BodyLine(line: AnnotatedString, highlighted: Boolean, first: Boolean, last: Boolean, hit: LineSpan?, current: Boolean) {
     val p = palette
+    val text = if (hit == null) {
+        line
+    } else {
+        buildAnnotatedString {
+            append(line)
+            // The current hit reads as in iOS find in page: black on yellow.
+            val style = if (current) SpanStyle(color = Color.Black, background = p.currentMatch) else SpanStyle(background = p.match)
+            addStyle(style, hit.start, hit.end)
+        }
+    }
     Text(
-        text = line,
+        text = text,
         style = KType.mono,
         // With syntax colors on, uncolored text is punctuation: mute it so values stand out.
         color = if (highlighted) p.secondaryLabel else p.label,
@@ -362,8 +519,9 @@ private fun NoteRow(text: String, first: Boolean, last: Boolean) {
     }
 }
 
+/** Small button for a section header, e.g. Copy; icon only when [label] is null. */
 @Composable
-private fun CopyButton(onClick: () -> Unit) {
+private fun HeaderButton(@DrawableRes icon: Int, label: String?, contentDescription: String?, onClick: () -> Unit) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     Row(
@@ -374,9 +532,90 @@ private fun CopyButton(onClick: () -> Unit) {
             .padding(horizontal = 6.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        KIcon(R.drawable.ktorch_ic_copy, contentDescription = null, size = 16.dp)
-        Spacer(Modifier.width(4.dp))
-        Text("Copy", style = KType.footnote.copy(fontWeight = FontWeight.SemiBold), color = palette.label)
+        KIcon(icon, contentDescription = contentDescription, size = 16.dp)
+        if (label != null) {
+            Spacer(Modifier.width(4.dp))
+            Text(label, style = KType.footnote.copy(fontWeight = FontWeight.SemiBold), color = palette.label)
+        }
+    }
+}
+
+/** Find bar for JSON keys, under the nav bar: field with the hit count, previous/next and Done. */
+@Composable
+private fun KeySearchBar(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    status: String,
+    canStep: Boolean,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
+    onDone: () -> Unit,
+) {
+    val p = palette
+    val focusManager = LocalFocusManager.current
+    val focus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { focus.requestFocus() }
+    Row(
+        Modifier.fillMaxWidth().padding(start = 16.dp, end = 12.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        SearchBox(
+            query = query,
+            onQueryChange = onQueryChange,
+            placeholder = "Search keys",
+            modifier = Modifier.weight(1f),
+            fieldModifier = Modifier.focusRequester(focus),
+            // Hits update while typing; the search key only hides the keyboard to show more lines.
+            onSearch = { focusManager.clearFocus() },
+        ) {
+            if (status.isNotEmpty()) {
+                Text(
+                    text = status,
+                    style = KType.footnote.copy(fontFeatureSettings = KType.TABULAR),
+                    color = p.secondaryLabel,
+                    maxLines = 1,
+                    modifier = Modifier.padding(start = 6.dp),
+                )
+            }
+        }
+        BarButton(R.drawable.ktorch_ic_chevron_up, contentDescription = "Previous match", enabled = canStep, onClick = onPrevious)
+        BarButton(R.drawable.ktorch_ic_chevron_down, contentDescription = "Next match", enabled = canStep, onClick = onNext)
+        Text(
+            text = "Done",
+            style = KType.body.copy(fontWeight = FontWeight.SemiBold),
+            color = p.label,
+            modifier = Modifier
+                .clickable(remember { MutableInteractionSource() }, indication = null, role = Role.Button, onClick = onDone)
+                .padding(horizontal = 4.dp, vertical = 10.dp),
+        )
+    }
+}
+
+/** Floating button that brings a long body back to the top. */
+@Composable
+private fun ScrollToTopButton(visible: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val p = palette
+    AnimatedVisibility(
+        visible = visible,
+        modifier = modifier,
+        enter = fadeIn() + scaleIn(initialScale = 0.6f),
+        exit = fadeOut() + scaleOut(targetScale = 0.6f),
+    ) {
+        val interaction = remember { MutableInteractionSource() }
+        val pressed by interaction.collectIsPressedAsState()
+        Box(
+            modifier = Modifier
+                .size(TopButtonSize)
+                .shadow(if (p.isDark) 0.dp else 6.dp, CircleShape)
+                .background(p.elevated, CircleShape)
+                // No shadow shows on black, so a hairline marks the edge instead.
+                .then(if (p.isDark) Modifier.border(Dp.Hairline, p.separator, CircleShape) else Modifier)
+                .clickable(interaction, indication = null, role = Role.Button, onClick = onClick)
+                .alpha(if (pressed) 0.35f else 1f),
+            contentAlignment = Alignment.Center,
+        ) {
+            KIcon(R.drawable.ktorch_ic_arrow_up, contentDescription = "Scroll to top", size = 20.dp)
+        }
     }
 }
 
