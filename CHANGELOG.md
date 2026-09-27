@@ -6,6 +6,24 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-09-27
+
+### Added
+- Copy button in the detail bar: copies `[METHOD] url`, the request headers and the
+  pretty-printed response body as one block.
+- Key search for JSON bodies: the magnifier next to Copy opens a find bar under the nav bar that
+  highlights matching key names, with a hit count and previous/next.
+- Scroll-to-top button, shown once the tabs have scrolled out of view.
+
+### Changed
+- The detail bar's Share button is now that Copy button; Share as Text File is still in the
+  More menu.
+
+### Fixed
+- An Activity passed as `context` is no longer kept alive for the client's lifetime: Ktor holds
+  the plugin config as long as the client exists, so the config now stores only the application
+  context (`library` and `library-no-op`).
+
 ## [0.1.0] - first tag
 
 Targets Ktor 3.6 / Kotlin 2.4.20 / AGP 9.4.
