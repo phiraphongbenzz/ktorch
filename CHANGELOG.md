@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-16
+
 ### Added
 - JSON folding in the detail screen: an arrow left of every multi-line object or array folds it
   to one line (`{ … }  4 keys`), and a header button collapses or expands them all. Key search
