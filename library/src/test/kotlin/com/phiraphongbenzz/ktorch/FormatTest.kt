@@ -161,16 +161,18 @@ class FormatTest {
     }
 
     @Test
-    fun `compact copy has method and url, request headers and the pretty response`() {
+    fun `compact copy has status, method and url, request headers, body kind and the pretty response`() {
         val t = transaction(code = 200, headers = listOf(Header("Accept", "application/json"), Header("Authorization", "***")))
             .copy(responseBody = Body(BodyState.CAPTURED, "application/json", 18, """{"id":1,"ok":true}""".toByteArray()))
         assertEquals(
             """
-            [GET] https://api.example.com/items?id=1
+            [200] [GET] https://api.example.com/items?id=1
 
             [Header]
             Accept: application/json
             Authorization: ***
+
+            [Body] none
 
             [Response]
             {
@@ -186,9 +188,71 @@ class FormatTest {
     fun `compact copy shows the error when there is no response`() {
         val t = transaction(method = "POST").copy(error = "ConnectException: Connection refused", totalMillis = 5)
         assertEquals(
-            "[POST] https://api.example.com/items?id=1\n\n[Header]\n(none)\n\n[Response]\nError: ConnectException: Connection refused",
+            "[Failed] [POST] https://api.example.com/items?id=1\n\n[Header]\n(none)\n\n[Body] none\n\n" +
+                "[Response]\nError: ConnectException: Connection refused",
             TextExporter.compact(t),
         )
+    }
+
+    @Test
+    fun `compact copy names the request body kind and shows its content`() {
+        fun copy(type: String, text: String, state: BodyState = BodyState.CAPTURED) =
+            TextExporter.compact(transaction(method = "POST", body = Body(state, type, text.length.toLong(), text.toByteArray())))
+                .substringAfter("[Body] ").substringBefore("\n\n[Response]")
+
+        assertEquals(
+            "x-www-form-urlencoded\nusername: dekd\nnote: สวัสดี & hello",
+            copy("application/x-www-form-urlencoded", "username=dekd&note=%E0%B8%AA%E0%B8%A7%E0%B8%B1%E0%B8%AA%E0%B8%94%E0%B8%B5+%26+hello"),
+        )
+        assertEquals(
+            "form-data\ntitle: My novel\nfile: <file a.bin, image/png>",
+            copy("multipart/form-data; boundary=x", "title: My novel\nfile: <file a.bin, image/png>", BodyState.FIELDS),
+        )
+        assertEquals("raw (JSON)\n{\n  \"a\": 1\n}", copy("application/json; charset=UTF-8", """{"a":1}"""))
+        assertEquals("raw (Text)\nhello", copy("text/plain", "hello"))
+        assertEquals("raw (XML)\n<a/>", copy("application/xml", "<a/>"))
+    }
+
+    @Test
+    fun `compact copy can keep JSON raw so a huge body still fits the clipboard`() {
+        val t = transaction(code = 200).copy(responseBody = Body(BodyState.CAPTURED, "application/json", 7, """{"a":1}""".toByteArray()))
+        assertTrue(TextExporter.compact(t, pretty = false).endsWith("[Response]\n{\"a\":1}"))
+    }
+
+    @Test
+    fun `truncated JSON is pretty-printed up to the last complete value`() {
+        val cut = """{"page":1,"data":[{"id":1,"name":"a"},{"id":2,"na"""
+        assertNull(JsonFormatter.format(cut))
+        val result = JsonFormatter.format(cut, partial = true)!!
+        assertEquals(false, result.complete)
+        assertEquals(
+            """
+            {
+              "page": 1,
+              "data": [
+                {
+                  "id": 1,
+                  "name": "a"
+                },
+                {
+                  "id": 2
+            """.trimIndent(),
+            result.text,
+        )
+        // The root, "data" and the second item were cut and run to the end; the first item closed.
+        assertEquals(3, result.containers.count { it.close < 0 })
+        assertEquals(4, result.containers.size)
+    }
+
+    @Test
+    fun `a number at the cut is dropped, it may have lost digits`() {
+        assertEquals("{\n  \"a\": 1", JsonFormatter.format("""{"a":1,"b":12""", partial = true)!!.text)
+    }
+
+    @Test
+    fun `partial mode still rejects JSON that is broken before the cut`() {
+        assertNull(JsonFormatter.format("""{"a":1,,"b":2""", partial = true))
+        assertNull(JsonFormatter.format("hello", partial = true))
     }
 
     @Test

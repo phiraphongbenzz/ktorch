@@ -51,6 +51,11 @@ internal object CurlFormatter {
                 }
             }
             BodyState.EMPTY -> Unit
+            // File contents were never read, so the parts are listed for rebuilding with -F.
+            BodyState.FIELDS -> {
+                notes += "NOTE: multipart body not included. Its parts, for -F:"
+                body.text.orEmpty().lines().filter { it.isNotEmpty() }.forEach { notes += "  $it" }
+            }
             else -> notes += "NOTE: request body not captured (${body.contentType ?: "unknown type"}, " +
                 "${Formats.bytes(body.size)}). ${Formats.bodyNote(body) ?: ""}".trim()
         }

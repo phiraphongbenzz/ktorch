@@ -8,6 +8,7 @@ import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.engine.mock.respondError
 import io.ktor.client.request.forms.formData
+import io.ktor.client.engine.mock.toByteArray
 import io.ktor.client.request.forms.submitFormWithBinaryData
 import io.ktor.client.request.get
 import io.ktor.client.request.header
@@ -319,23 +320,35 @@ class CaptureTest {
     }
 
     @Test
-    fun `multipart upload is recorded as metadata only`() = runBlocking {
+    fun `multipart upload records its fields, never the file contents`() = runBlocking {
         val store = TransactionStore(100)
-        val client = testClient(MockEngine { respond("{}", HttpStatusCode.OK, jsonHeaders) }, store)
+        var uploaded = 0
+        val client = testClient(
+            MockEngine { request ->
+                uploaded = request.body.toByteArray().size
+                respond("{}", HttpStatusCode.OK, jsonHeaders)
+            },
+            store,
+        ) { redactBodyFields += "password" }
 
         client.submitFormWithBinaryData(
             url = "https://api.example.com/upload",
             formData = formData {
+                append("title", "My novel")
+                append("password", "hunter2")
                 append("file", ByteArray(512 * 1024) { 1 }, Headers.build {
+                    append(HttpHeaders.ContentType, "application/octet-stream")
                     append(HttpHeaders.ContentDisposition, "filename=\"a.bin\"")
                 })
             },
         ).bodyAsText()
 
         val body = store.awaitFinished().single().requestBody
-        assertEquals(BodyState.STREAMING, body.state)
-        assertNull(body.bytes)
+        assertEquals(BodyState.FIELDS, body.state)
+        assertEquals("title: My novel\npassword: ***\nfile: <file a.bin, application/octet-stream, 512.0 KB>", body.text)
         assertTrue(body.contentType!!.startsWith("multipart/form-data"))
+        // Listing the parts did not consume the upload.
+        assertTrue(uploaded > 512 * 1024)
     }
 
     @Test

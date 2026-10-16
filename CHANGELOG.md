@@ -6,6 +6,24 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- JSON folding in the detail screen: an arrow left of every multi-line object or array folds it
+  to one line (`{ … }  4 keys`), and a header button collapses or expands them all. Key search
+  opens the folds around a hit.
+- Multipart form uploads now record their parts: one `name: value` line per field, file parts
+  described by name, type and size. File contents are still never read.
+- The request Body header names the body kind: `form-data`, `x-www-form-urlencoded`,
+  `raw (JSON)` and so on.
+
+### Changed
+- The copy button now copies `[CODE] [METHOD] url`, the request headers, `[Body] <kind>` with the
+  request body (form fields decoded one per line), then the response. When pretty JSON is too
+  large for the clipboard it falls back to the raw JSON.
+
+### Fixed
+- A JSON body cut at `maxContentLength` was shown as one unreadable raw block even in Pretty
+  mode. It is now pretty-printed up to the last complete value, and can be folded.
+
 ## [0.1.1] - 2026-09-27
 
 ### Added

@@ -20,6 +20,9 @@ internal enum class BodyState {
     /** Streaming, multipart or unknown-length content: metadata only, never buffered. */
     STREAMING,
 
+    /** Multipart form: one `name: value` line per part, file parts described, never read. */
+    FIELDS,
+
     /** Non-text content type (image, PDF, ZIP, ...): metadata only. */
     BINARY,
 

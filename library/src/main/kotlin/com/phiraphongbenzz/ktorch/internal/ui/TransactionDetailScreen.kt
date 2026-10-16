@@ -62,6 +62,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -73,6 +74,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -100,6 +102,9 @@ private const val SYNC_FORMAT_BYTES = 32 * 1024
 
 /** Documents with up to this many keys are searched inline; larger ones off the main thread. */
 private const val SYNC_SEARCH_KEYS = 5_000
+
+/** Width of the fold arrows left of the JSON lines. */
+private val FoldGutter = 12.dp
 
 /** The scroll-to-top button, and its distance from the screen edges. */
 private val TopButtonSize = 44.dp
@@ -137,10 +142,26 @@ internal fun TransactionDetailScreen(transaction: HttpTransaction?, onBack: (() 
     }.orEmpty()
     val note = Formats.bodyNote(body)
     val content = rememberBodyContent(body, pretty, p.json)
+    // Start lines of the folded JSON containers; a new body starts fully expanded.
+    var folded by remember(content) { mutableStateOf(emptySet<Int>()) }
+    val visible = remember(content, folded) { content.visibleLines(folded) }
     val hits = rememberKeyHits(content, if (searching) query else "")
     var current by remember(hits) { mutableIntStateOf(0) }
     val firstLine = firstLineIndex(headers, note)
-    LaunchedEffect(hits) { hits.firstOrNull()?.let { listState.reveal(firstLine + it.line) } }
+    // Body line to scroll to; a new object each time, so asking for the same line again still scrolls.
+    var revealTarget by remember(content) { mutableStateOf<RevealTarget?>(null) }
+    LaunchedEffect(hits) { hits.firstOrNull()?.let { revealTarget = RevealTarget(it.line) } }
+    LaunchedEffect(revealTarget, visible) {
+        val line = revealTarget?.line ?: return@LaunchedEffect
+        val position = visible.binarySearch(line)
+        if (position < 0) {
+            // Hidden in a fold: open it, then this runs again with the new visible lines.
+            folded = content.reveal(folded, line)
+            return@LaunchedEffect
+        }
+        revealTarget = null
+        listState.reveal(firstLine + position)
+    }
 
     fun closeSearch() {
         focusManager.clearFocus()
@@ -150,8 +171,7 @@ internal fun TransactionDetailScreen(transaction: HttpTransaction?, onBack: (() 
     fun step(by: Int) {
         if (hits.isEmpty()) return
         current = (current + by).mod(hits.size)
-        val index = firstLine + hits[current].line
-        scope.launch { listState.reveal(index) }
+        revealTarget = RevealTarget(hits[current].line)
     }
     BackHandler(enabled = searching) { closeSearch() }
 
@@ -166,7 +186,13 @@ internal fun TransactionDetailScreen(transaction: HttpTransaction?, onBack: (() 
                 BarButton(R.drawable.ktorch_ic_copy, contentDescription = "Copy request and response") {
                     scope.launch {
                         val text = withContext(Dispatchers.Default) { TextExporter.compact(transaction) }
-                        copied(context, Sharer.copy(context, "Request", text))
+                        // Indentation can push a big JSON body past the clipboard limit; raw JSON is smaller.
+                        val ok = Sharer.copy(context, "Request", text) || Sharer.copy(
+                            context,
+                            "Request",
+                            withContext(Dispatchers.Default) { TextExporter.compact(transaction, pretty = false) },
+                        )
+                        copied(context, ok)
                     }
                 }
                 Box {
@@ -262,6 +288,11 @@ internal fun TransactionDetailScreen(transaction: HttpTransaction?, onBack: (() 
                             headers = headers,
                             note = note,
                             content = content,
+                            kind = if (tab == 1) Formats.bodyKind(body) else null,
+                            visible = visible,
+                            folded = folded,
+                            onToggleFold = { line -> folded = if (line in folded) folded - line else folded + line },
+                            onFoldAll = { folded = if (folded.isEmpty()) content.collapseAll() else emptySet() },
                             pretty = pretty,
                             onPrettyChange = {
                                 pretty = it
@@ -290,6 +321,8 @@ internal fun TransactionDetailScreen(transaction: HttpTransaction?, onBack: (() 
         }
     }
 }
+
+private class RevealTarget(val line: Int)
 
 /** Small bodies format inline (no flash of empty content); large ones off the main thread. */
 @Composable
@@ -429,6 +462,11 @@ private fun LazyListScope.message(
     headers: List<Header>,
     note: String?,
     content: BodyContent,
+    kind: String?,
+    visible: IntArray,
+    folded: Set<Int>,
+    onToggleFold: (Int) -> Unit,
+    onFoldAll: () -> Unit,
     pretty: Boolean,
     onPrettyChange: (Boolean) -> Unit,
     onCopy: () -> Unit,
@@ -445,8 +483,18 @@ private fun LazyListScope.message(
         }
     }
     item(key = "body-header") {
-        SectionHeader("Body") {
+        // The request says what kind of body it sent: form-data, x-www-form-urlencoded, raw (JSON)...
+        SectionHeader(if (kind == null || kind == "none") "Body" else "Body · $kind") {
             if (content.isJson) HeaderButton(R.drawable.ktorch_ic_search, label = null, contentDescription = "Search keys", onClick = onSearch)
+            if (content.folds.isNotEmpty()) {
+                val anyFolded = folded.isNotEmpty()
+                HeaderButton(
+                    if (anyFolded) R.drawable.ktorch_ic_expand else R.drawable.ktorch_ic_collapse,
+                    label = null,
+                    contentDescription = if (anyFolded) "Expand all" else "Collapse all",
+                    onClick = onFoldAll,
+                )
+            }
             // Copy sits next to the Pretty/Raw switch and copies exactly what is shown.
             if (content.text.isNotEmpty()) HeaderButton(R.drawable.ktorch_ic_copy, label = "Copy", contentDescription = null, onClick = onCopy)
             if (content.isJson) {
@@ -465,44 +513,115 @@ private fun LazyListScope.message(
     if (note != null) {
         item(key = "body-note") { NoteRow(note, first = true, last = lines.isEmpty()) }
     }
-    itemsIndexed(lines, key = { i, _ -> "line-$i" }) { i, line ->
+    val foldable = content.folds.isNotEmpty()
+    items(visible.size, key = { "line-${visible[it]}" }) { position ->
+        val i = visible[position]
         // Pretty JSON has at most one key per line, so at most one hit.
         val hit = hits.binarySearchBy(i) { it.line }
+        val fold = content.foldAt(i)
         BodyLine(
-            line = line,
+            line = lines[i],
             highlighted = content.highlighted,
-            first = note == null && i == 0,
-            last = i == lines.lastIndex,
+            first = note == null && position == 0,
+            last = position == visible.lastIndex,
             hit = hits.getOrNull(hit),
             current = hit == current,
+            gutter = foldable,
+            fold = fold,
+            folded = fold != null && i in folded,
+            closing = fold?.takeIf { it.closed }?.let { lines[it.end].text.trimStart() },
+            onToggleFold = { onToggleFold(i) },
         )
     }
 }
 
+/**
+ * One body line. With [gutter], a fold arrow sits left of lines that open an object or array;
+ * a [folded] line shows the closing bracket ([closing]) and how much it hides.
+ */
 @Composable
-private fun BodyLine(line: AnnotatedString, highlighted: Boolean, first: Boolean, last: Boolean, hit: LineSpan?, current: Boolean) {
+private fun BodyLine(
+    line: AnnotatedString,
+    highlighted: Boolean,
+    first: Boolean,
+    last: Boolean,
+    hit: LineSpan?,
+    current: Boolean,
+    gutter: Boolean = false,
+    fold: Fold? = null,
+    folded: Boolean = false,
+    closing: String? = null,
+    onToggleFold: () -> Unit = {},
+) {
     val p = palette
-    val text = if (hit == null) {
+    val text = if (hit == null && !folded) {
         line
     } else {
         buildAnnotatedString {
             append(line)
-            // The current hit reads as in iOS find in page: black on yellow.
-            val style = if (current) SpanStyle(color = Color.Black, background = p.currentMatch) else SpanStyle(background = p.match)
-            addStyle(style, hit.start, hit.end)
+            if (hit != null) {
+                // The current hit reads as in iOS find in page: black on yellow.
+                val style = if (current) SpanStyle(color = Color.Black, background = p.currentMatch) else SpanStyle(background = p.match)
+                addStyle(style, hit.start, hit.end)
+            }
+            if (folded && fold != null) {
+                withStyle(SpanStyle(color = p.label, background = p.match)) { append(" … ") }
+                closing?.let { append(it) }
+                val unit = if (fold.isArray) "item" else "key"
+                withStyle(SpanStyle(color = p.tertiaryLabel)) {
+                    // A container cut at the capture limit holds at least this many.
+                    append("  ${fold.size}${if (fold.closed) "" else "+"} $unit")
+                    if (fold.size != 1 || !fold.closed) append("s")
+                }
+            }
         }
     }
-    Text(
-        text = text,
-        style = KType.mono,
-        // With syntax colors on, uncolored text is punctuation: mute it so values stand out.
-        color = if (highlighted) p.secondaryLabel else p.label,
-        modifier = Modifier
+    Row(
+        Modifier
             .fillMaxWidth()
             .cardSegment(p.card, first, last)
-            .padding(horizontal = 14.dp)
+            .padding(start = if (gutter) 2.dp else 14.dp, end = 14.dp)
             .padding(top = if (first) 12.dp else 0.dp, bottom = if (last) 12.dp else 0.dp),
-    )
+    ) {
+        if (gutter) {
+            Box(
+                modifier = Modifier
+                    .width(FoldGutter)
+                    .height(with(LocalDensity.current) { KType.mono.lineHeight.toDp() })
+                    .then(
+                        if (fold == null) {
+                            Modifier
+                        } else {
+                            Modifier.clickable(
+                                remember { MutableInteractionSource() },
+                                indication = null,
+                                role = Role.Button,
+                                onClickLabel = if (folded) "Expand" else "Collapse",
+                                onClick = onToggleFold,
+                            )
+                        },
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (fold != null) {
+                    KIcon(
+                        R.drawable.ktorch_ic_chevron_down,
+                        contentDescription = null,
+                        tint = p.secondaryLabel,
+                        size = 11.dp,
+                        modifier = Modifier.rotate(if (folded) -90f else 0f),
+                    )
+                }
+            }
+        }
+        Text(
+            text = text,
+            style = KType.mono,
+            // With syntax colors on, uncolored text is punctuation: mute it so values stand out.
+            color = if (highlighted) p.secondaryLabel else p.label,
+            modifier = Modifier.weight(1f),
+        )
+    }
 }
 
 @Composable

@@ -60,6 +60,9 @@ internal class Redactor(
     /** Redacts an `application/x-www-form-urlencoded` body. */
     fun formFields(encoded: String): String = redactPairs(encoded, formNames)
 
+    /** Redacts one multipart form field by name. */
+    fun formField(name: String, value: String): String = if (name.lowercase() in formNames) REDACTED else value
+
     private fun redactPairs(encoded: String, names: Set<String>): String {
         if (names.isEmpty() || encoded.isEmpty()) return encoded
         var changed = false
