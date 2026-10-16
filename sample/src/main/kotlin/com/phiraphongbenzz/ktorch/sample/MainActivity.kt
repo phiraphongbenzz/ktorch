@@ -8,6 +8,7 @@ import androidx.lifecycle.lifecycleScope
 import com.phiraphongbenzz.ktorch.NetworkInspector
 import com.phiraphongbenzz.ktorch.sample.databinding.ActivityMainBinding
 import io.ktor.client.request.forms.formData
+import io.ktor.client.request.forms.submitForm
 import io.ktor.client.request.forms.submitFormWithBinaryData
 import io.ktor.client.request.get
 import io.ktor.client.request.header
@@ -21,6 +22,7 @@ import io.ktor.http.ContentType
 import io.ktor.http.Headers
 import io.ktor.http.HttpHeaders
 import io.ktor.http.contentType
+import io.ktor.http.parameters
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
@@ -46,6 +48,17 @@ class MainActivity : AppCompatActivity() {
                 setBody("""{"items":[1,2,3],"device":"sample","note":"hello"}""")
             }.bodyAsText()
         }
+        button("GET long JSON (120 KB)") { client.get("$base/big-json/120").bodyAsText().length }
+        button("GET long JSON (600 KB, over the cap)") { client.get("$base/big-json/600").bodyAsText().length }
+        button("POST url-encoded form") {
+            client.submitForm(
+                url = "$base/form",
+                formParameters = parameters {
+                    append("username", "dekd")
+                    append("note", "สวัสดี & hello")
+                },
+            ).bodyAsText()
+        }
         button("GET 404") { client.get("$base/status/404").bodyAsText() }
         button("GET 500") { client.get("$base/status/500").bodyAsText() }
         button("GET redirect (302 → 200)") { client.get("$base/redirect").bodyAsText() }
@@ -55,6 +68,8 @@ class MainActivity : AppCompatActivity() {
             client.submitFormWithBinaryData(
                 url = "$base/upload",
                 formData = formData {
+                    append("title", "My novel")
+                    append("chapter", 12)
                     append("file", ByteArray(1024 * 1024) { 7 }, Headers.build {
                         append(HttpHeaders.ContentType, "application/octet-stream")
                         append(HttpHeaders.ContentDisposition, "filename=\"archive.zip\"")

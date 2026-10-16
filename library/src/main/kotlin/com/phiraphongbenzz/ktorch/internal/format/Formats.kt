@@ -3,6 +3,7 @@ package com.phiraphongbenzz.ktorch.internal.format
 import com.phiraphongbenzz.ktorch.internal.data.Body
 import com.phiraphongbenzz.ktorch.internal.data.BodyState
 import com.phiraphongbenzz.ktorch.internal.data.HttpTransaction
+import io.ktor.http.decodeURLQueryComponent
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -49,12 +50,49 @@ internal object Formats {
         return parts.joinToString(" · ")
     }
 
-    /** Text for a body, JSON pretty-printed when [pretty] is set. `null` when there is no text. */
+    /**
+     * Text for a body, JSON pretty-printed when [pretty] is set; a truncated JSON body is
+     * pretty-printed as far as it goes. `null` when there is no text.
+     */
     fun bodyText(body: Body?, pretty: Boolean): String? {
         val text = body?.text ?: return null
         if (!pretty || !JsonFormatter.looksLikeJson(text)) return text
-        return JsonFormatter.format(text)?.text ?: text
+        return JsonFormatter.format(text, partial = body.state == BodyState.TRUNCATED)?.text ?: text
     }
+
+    /**
+     * What kind of body this is, in Postman's terms: `none`, `form-data`,
+     * `x-www-form-urlencoded`, `raw (JSON)` and the like, or `binary`.
+     */
+    fun bodyKind(body: Body?): String {
+        if (body == null || body.state == BodyState.EMPTY) return "none"
+        val type = body.contentType?.substringBefore(';')?.trim()?.lowercase().orEmpty()
+        val sub = type.substringAfter('/')
+        return when {
+            type == "multipart/form-data" || body.state == BodyState.FIELDS -> "form-data"
+            type.startsWith("multipart/") -> type
+            sub == "x-www-form-urlencoded" -> "x-www-form-urlencoded"
+            sub == "json" || sub.endsWith("+json") || sub == "x-ndjson" || sub == "ndjson" -> "raw (JSON)"
+            sub == "xml" || sub.endsWith("+xml") -> "raw (XML)"
+            sub == "html" -> "raw (HTML)"
+            sub == "javascript" || sub == "x-javascript" || sub == "ecmascript" -> "raw (JavaScript)"
+            sub == "graphql" -> "raw (GraphQL)"
+            body.state == BodyState.BINARY -> "binary"
+            type.startsWith("text/") || type.isEmpty() -> "raw (Text)"
+            else -> "raw ($type)"
+        }
+    }
+
+    /** An `x-www-form-urlencoded` body as decoded `name: value` lines (Postman's bulk edit format). */
+    fun formFields(encoded: String): String =
+        encoded.split('&').filter { it.isNotEmpty() }.joinToString("\n") { pair ->
+            val name = pair.substringBefore('=')
+            val value = pair.substringAfter('=', missingDelimiterValue = "")
+            "${decode(name)}: ${decode(value)}"
+        }
+
+    private fun decode(part: String): String =
+        runCatching { part.decodeURLQueryComponent(plusIsSpace = true) }.getOrDefault(part)
 
     /** Human explanation for bodies that have no text to show. */
     fun bodyNote(body: Body?): String? {
@@ -65,6 +103,7 @@ internal object Formats {
             BodyState.EMPTY -> "(no body)"
             BodyState.PENDING -> "Receiving body…"
             BodyState.CAPTURED -> null
+            BodyState.FIELDS -> null
             BodyState.TRUNCATED -> "Truncated: showing the first ${bytes(body.bytes?.size?.toLong())} of ${bytes(body.size)}."
             BodyState.STREAMING -> "Not captured: streaming or multipart body ($type$size)."
             BodyState.BINARY -> "Binary content not shown ($type$size)."

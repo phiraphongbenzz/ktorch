@@ -52,6 +52,15 @@ object LocalServer {
                         HttpStatusCode.fromValue(code),
                     )
                 }
+                // Nested JSON of about [kb] KB: exercises long bodies and folding.
+                get("/big-json/{kb}") {
+                    val kb = call.parameters["kb"]?.toIntOrNull() ?: 100
+                    call.respondText(bigJson(kb * 1024), ContentType.Application.Json)
+                }
+                post("/form") {
+                    val body = call.receiveText()
+                    call.respondText("""{"received_bytes":${body.toByteArray().size}}""", ContentType.Application.Json)
+                }
                 get("/redirect") { call.respondRedirect("/api/items?id=7") }
                 get("/slow") {
                     delay(3_000)
@@ -71,6 +80,18 @@ object LocalServer {
                 }
             }
         }.start(wait = false)
+    }
+
+    private fun bigJson(bytes: Int): String = buildString {
+        append("""{"page":1,"total":0,"data":[""")
+        var i = 0
+        while (length < bytes) {
+            if (i > 0) append(',')
+            append("""{"id":$i,"title":"ตอนที่ $i: ทดสอบ","author":{"id":${i * 7},"name":"writer_$i","tags":["novel","fantasy"]},""")
+            append(""""stats":{"views":${i * 131},"likes":${i * 17},"chapters":[${(1..5).joinToString(",") { """{"no":$it,"words":${it * 900}}""" }}]}}""")
+            i++
+        }
+        append("]}")
     }
 
     private suspend fun RoutingContext.streamBytes(

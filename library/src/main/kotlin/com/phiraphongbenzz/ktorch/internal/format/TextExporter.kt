@@ -1,6 +1,7 @@
 package com.phiraphongbenzz.ktorch.internal.format
 
 import com.phiraphongbenzz.ktorch.internal.data.Body
+import com.phiraphongbenzz.ktorch.internal.data.BodyState
 import com.phiraphongbenzz.ktorch.internal.data.Header
 import com.phiraphongbenzz.ktorch.internal.data.HttpTransaction
 
@@ -32,14 +33,21 @@ internal object TextExporter {
     fun formatAll(transactions: List<HttpTransaction>): String =
         transactions.joinToString("\n\n") { format(it) }
 
-    /** Short form for the clipboard: `[METHOD] url`, request headers and the pretty response body. */
-    fun compact(t: HttpTransaction): String = buildString {
-        append('[').append(t.method).append("] ").append(t.url).append('\n')
+    /**
+     * Short form for the clipboard: `[CODE] [METHOD] url`, request headers, the request body with
+     * its kind, and the response body. JSON is pretty-printed when [pretty] is set; a very large
+     * body may need `pretty = false` to fit the clipboard.
+     */
+    fun compact(t: HttpTransaction, pretty: Boolean = true): String = buildString {
+        val code = t.responseCode?.toString() ?: if (t.error != null) "Failed" else "Pending"
+        append('[').append(code).append("] [").append(t.method).append("] ").append(t.url).append('\n')
         append("\n[Header]\n")
         headers(t.requestHeaders)
+        append("\n[Body] ").append(Formats.bodyKind(t.requestBody)).append('\n')
+        requestBody(t.requestBody, pretty)
         append("\n[Response]\n")
         // Failed before any response: say why instead of "Waiting for response…".
-        if (t.responseBody == null && t.error != null) line("Error", t.error) else body(t.responseBody)
+        if (t.responseBody == null && t.error != null) line("Error", t.error) else body(t.responseBody, pretty)
     }.trimEnd()
 
     private fun StringBuilder.line(name: String, value: String) {
@@ -51,8 +59,20 @@ internal object TextExporter {
         headers.forEach { append(it.name).append(": ").append(it.value).append('\n') }
     }
 
-    private fun StringBuilder.body(body: Body?) {
+    private fun StringBuilder.body(body: Body?, pretty: Boolean = true) {
         Formats.bodyNote(body)?.let { append(it).append('\n') }
-        Formats.bodyText(body, pretty = true)?.let { append(it).append('\n') }
+        Formats.bodyText(body, pretty)?.let { append(it).append('\n') }
+    }
+
+    /** No "(no body)" line: the kind already says `none`. A form shows one decoded field per line. */
+    private fun StringBuilder.requestBody(body: Body, pretty: Boolean) {
+        if (body.state == BodyState.EMPTY) return
+        val text = body.text
+        if (text != null && Formats.bodyKind(body) == "x-www-form-urlencoded") {
+            Formats.bodyNote(body)?.let { append(it).append('\n') }
+            if (text.isNotEmpty()) append(Formats.formFields(text)).append('\n')
+            return
+        }
+        body(body, pretty)
     }
 }

@@ -7,14 +7,17 @@ import com.phiraphongbenzz.ktorch.internal.data.HttpTransaction
 import com.phiraphongbenzz.ktorch.internal.data.TransactionStore
 import com.phiraphongbenzz.ktorch.internal.format.Formats
 import io.ktor.client.call.replaceResponse
+import io.ktor.client.request.forms.MultiPartFormDataContent
 import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.statement.HttpResponse
+import io.ktor.http.ContentDisposition
 import io.ktor.http.ContentType
 import io.ktor.http.Headers
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.Url
 import io.ktor.http.content.OutgoingContent
+import io.ktor.http.content.PartData
 import io.ktor.util.AttributeKey
 import io.ktor.utils.io.ByteChannel
 import io.ktor.utils.io.ByteReadChannel
@@ -311,6 +314,7 @@ internal class Recorder(
         val typeName = type?.toString()
         val length = content.contentLength
         if (skip) return Body(BodyState.SKIPPED, typeName, length)
+        if (content is MultiPartFormDataContent) return multipartFields(content, typeName, length)
         // TextContent and FormDataContent are ByteArrayContent: already in memory, safe to read.
         // Channel/multipart content is streamed; reading it would consume the upload.
         if (content !is OutgoingContent.ByteArrayContent) return Body(BodyState.STREAMING, typeName, length)
@@ -330,6 +334,38 @@ internal class Recorder(
         )
         val state = if (all.size > cap) BodyState.TRUNCATED else BodyState.CAPTURED
         return Body(state, typeName, all.size.toLong(), kept, charset)
+    }
+
+    /**
+     * Lists the parts of a multipart form as `name: value` lines. Only the part list is looked
+     * at: file contents are providers that would consume the upload, so they are described
+     * (file name, type, size), never read.
+     */
+    @OptIn(InternalAPI::class)
+    private fun multipartFields(content: MultiPartFormDataContent, typeName: String?, length: Long?): Body {
+        val text = content.parts.joinToString("\n") { part ->
+            val name = part.name ?: "(unnamed)"
+            val value = when (part) {
+                is PartData.FormItem -> redactor.formField(name, part.value)
+                else -> {
+                    // formData { } adds its own "form-data; name=..." before the caller's
+                    // `filename=...`; on the wire they are one header, so parse them as one.
+                    val disposition = part.headers.getAll(HttpHeaders.ContentDisposition).orEmpty().joinToString("; ")
+                    val fileName = swallow { ContentDisposition.parse(disposition).parameter(ContentDisposition.Parameters.FileName) }
+                    val size = part.headers[HttpHeaders.ContentLength]?.toLongOrNull()
+                    val details = listOfNotNull(part.contentType?.toString(), size?.let { Formats.bytes(it) })
+                    buildString {
+                        append("<file")
+                        fileName?.let { append(' ').append(it) }
+                        if (details.isNotEmpty()) append(", ").append(details.joinToString(", "))
+                        append('>')
+                    }
+                }
+            }
+            "$name: $value"
+        }
+        if (text.isEmpty()) return Body(BodyState.STREAMING, typeName, length)
+        return Body(BodyState.FIELDS, typeName, length, text.toByteArray(Charsets.UTF_8), Charsets.UTF_8)
     }
 
     /** Applies field redaction to a text body; returns [bytes] itself when nothing matched. */
